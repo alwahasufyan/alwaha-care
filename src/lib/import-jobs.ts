@@ -1,0 +1,383 @@
+import { Prisma, ImportJobStatus } from "@prisma/client";
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import prisma from "@/lib/prisma";
+import { INITIAL_BALANCE } from "@/lib/config";
+
+const rawImportRowSchema = z.record(z.string(), z.unknown());
+
+export type ImportJobSnapshot = {
+  id: string;
+  status: ImportJobStatus;
+  totalRows: number;
+  processedRows: number;
+  insertedRows: number;
+  duplicateRows: number;
+  failedRows: number;
+  errorMessage: string | null;
+  progress: number;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+};
+
+type NormalizedImportRow = {
+  card_number: string;
+  name: string;
+  birth_date: Date | null;
+};
+
+function normalizeString(value: unknown) {
+  if (typeof value !== "string") {
+    return String(value ?? "").trim();
+  }
+
+  return value.trim();
+}
+
+function normalizeDateOnly(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function parseExcelSerial(serial: number) {
+  const excelEpoch = Date.UTC(1899, 11, 30);
+  const parsed = new Date(excelEpoch + serial * 86400000);
+  return Number.isNaN(parsed.getTime()) ? null : normalizeDateOnly(parsed);
+}
+
+// نطاق صالح لأرقام Excel التسلسلية (1 يناير 1900 → 31 ديسمبر 9999)
+const EXCEL_SERIAL_MIN = 1;
+const EXCEL_SERIAL_MAX = 2958465;
+
+function parseBirthDate(value: unknown): Date | null {
+  if (value == null || value === "") return null;
+
+  // كائن Date مباشرة
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : normalizeDateOnly(value);
+  }
+
+  // رقم → رقم تسلسلي Excel
+  if (typeof value === "number") {
+    if (value < EXCEL_SERIAL_MIN || value > EXCEL_SERIAL_MAX) return null;
+    return parseExcelSerial(value);
+  }
+
+  const str = typeof value === "string" ? value.trim() : String(value).trim();
+  if (!str) return null;
+
+  // نص رقمي صرف → رقم تسلسلي Excel (يعالج حالة raw:false مع خلايا غير منسقة)
+  if (/^\d+(\.\d+)?$/.test(str)) {
+    const serial = parseFloat(str);
+    if (serial < EXCEL_SERIAL_MIN || serial > EXCEL_SERIAL_MAX) return null;
+    return parseExcelSerial(serial);
+  }
+
+  // DD/MM/YYYY أو DD-MM-YYYY أو DD.MM.YYYY (مع دعم السنتين)
+  const dmy = str.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if (dmy) {
+    const [, d, m, y] = dmy;
+    let year = Number(y);
+    if (y.length === 2) year += year <= 30 ? 2000 : 1900;
+    const candidate = new Date(Date.UTC(year, Number(m) - 1, Number(d)));
+    if (!Number.isNaN(candidate.getTime()) && candidate.getUTCFullYear() === year) {
+      return normalizeDateOnly(candidate);
+    }
+  }
+
+  // YYYY-MM-DD (ISO)
+  const iso = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    const [, y, m, d] = iso;
+    const year = Number(y);
+    if (year >= 1 && year <= 9999) {
+      const candidate = new Date(Date.UTC(year, Number(m) - 1, Number(d)));
+      return Number.isNaN(candidate.getTime()) ? null : normalizeDateOnly(candidate);
+    }
+  }
+
+  return null;
+}
+
+function extractBirthDate(row: Record<string, unknown>) {
+  return row.birth_date ?? row.date_of_birth ?? row.birthDate ?? row["تاريخ_الميلاد"] ?? row["تاريخ الميلاد"];
+}
+
+function getField(row: Record<string, unknown>, ...keys: string[]): unknown {
+  // أولاً: بحث مباشر
+  for (const key of keys) {
+    if (key in row) return row[key];
+  }
+  // ثانياً: بحث بعد تنظيف مفاتيح الصف (يعالج المسافات الزائدة في أسماء الأعمدة)
+  const trimmedEntries = Object.entries(row).map(([k, v]) => [k.trim().toLowerCase(), v] as const);
+  for (const key of keys) {
+    const found = trimmedEntries.find(([k]) => k === key.toLowerCase());
+    if (found) return found[1];
+  }
+  return undefined;
+}
+
+function normalizeImportRow(row: unknown): { data?: NormalizedImportRow; error?: string } {
+  const parsed = rawImportRowSchema.safeParse(row);
+  if (!parsed.success) {
+    return { error: "invalid_row" };
+  }
+
+  const cardNumber = normalizeString(getField(parsed.data, "card_number", "رقم البطاقة", "رقم_البطاقة", "الرقم"));
+  const name = normalizeString(getField(parsed.data, "name", "الاسم", "اسم المستفيد", "اسم_المستفيد"));
+  if (!cardNumber || !name) {
+    return { error: "missing_required_fields" };
+  }
+
+  const birthDateValue = extractBirthDate(parsed.data);
+  // إذا فشل تحليل التاريخ نتجاهله ولا نفشل الصف (birth_date اختياري)
+  const birthDate = parseBirthDate(birthDateValue);
+
+  return {
+    data: {
+      card_number: cardNumber,
+      name,
+      birth_date: birthDate,
+    },
+  };
+}
+
+function chunkRows<T>(rows: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < rows.length; index += size) {
+    chunks.push(rows.slice(index, index + size));
+  }
+  return chunks;
+}
+
+async function yieldToEventLoop() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function toSnapshot(job: {
+  id: string;
+  status: ImportJobStatus;
+  total_rows: number;
+  processed_rows: number;
+  inserted_rows: number;
+  duplicate_rows: number;
+  failed_rows: number;
+  error_message: string | null;
+  created_at: Date;
+  started_at: Date | null;
+  completed_at: Date | null;
+}): ImportJobSnapshot {
+  const progress = job.total_rows === 0 ? 0 : Math.min(100, Math.round((job.processed_rows / job.total_rows) * 100));
+
+  return {
+    id: job.id,
+    status: job.status,
+    totalRows: job.total_rows,
+    processedRows: job.processed_rows,
+    insertedRows: job.inserted_rows,
+    duplicateRows: job.duplicate_rows,
+    failedRows: job.failed_rows,
+    errorMessage: job.error_message,
+    progress,
+    createdAt: job.created_at.toISOString(),
+    startedAt: job.started_at?.toISOString() ?? null,
+    completedAt: job.completed_at?.toISOString() ?? null,
+  };
+}
+
+export async function createImportJob(data: unknown[], username: string) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return { error: "الملف لا يحتوي على صفوف قابلة للاستيراد." };
+  }
+
+  const jsonSafePayload = JSON.parse(JSON.stringify(data)) as Prisma.InputJsonValue;
+
+  const job = await prisma.importJob.create({
+    data: {
+      created_by: username,
+      payload: jsonSafePayload,
+      total_rows: data.length,
+    },
+  });
+
+  return { job: toSnapshot(job) };
+}
+
+export async function getImportJobSnapshot(jobId: string, username?: string) {
+  const job = await prisma.importJob.findFirst({
+    where: {
+      id: jobId,
+      // إذا لم يُمرَّر username (مشرف) → يرى أي job
+      ...(username ? { created_by: username } : {}),
+    },
+  });
+
+  if (!job) {
+    return null;
+  }
+
+  return toSnapshot(job);
+}
+
+export async function processImportJob(jobId: string, username: string) {
+  const lock = await prisma.importJob.updateMany({
+    where: {
+      id: jobId,
+      created_by: username,
+      status: {
+        in: ["PENDING", "FAILED"],
+      },
+    },
+    data: {
+      status: "PROCESSING",
+      started_at: new Date(),
+      completed_at: null,
+      error_message: null,
+      processed_rows: 0,
+      inserted_rows: 0,
+      duplicate_rows: 0,
+      failed_rows: 0,
+    },
+  });
+
+  const currentJob = await prisma.importJob.findFirst({
+    where: {
+      id: jobId,
+      created_by: username,
+    },
+  });
+
+  if (!currentJob) {
+    return { error: "لم يتم العثور على مهمة الاستيراد." };
+  }
+
+  if (lock.count === 0) {
+    return { job: toSnapshot(currentJob) };
+  }
+
+  try {
+    const payload = Array.isArray(currentJob.payload) ? currentJob.payload : [];
+    const uniqueRows: NormalizedImportRow[] = [];
+    const seenCards = new Set<string>();
+
+    let processedRows = 0;
+    let duplicateRows = 0;
+    let failedRows = 0;
+    let insertedRows = 0;
+
+    for (const row of payload) {
+      const normalized = normalizeImportRow(row);
+      if (!normalized.data) {
+        failedRows += 1;
+        processedRows += 1;
+        continue;
+      }
+
+      if (seenCards.has(normalized.data.card_number)) {
+        duplicateRows += 1;
+        processedRows += 1;
+        continue;
+      }
+
+      seenCards.add(normalized.data.card_number);
+      uniqueRows.push(normalized.data);
+    }
+
+    await prisma.importJob.update({
+      where: { id: currentJob.id },
+      data: {
+        processed_rows: processedRows,
+        duplicate_rows: duplicateRows,
+        failed_rows: failedRows,
+      },
+    });
+
+    for (const chunk of chunkRows(uniqueRows, 100)) {
+      const cardNumbers = chunk.map((row) => row.card_number);
+      const existing = await prisma.beneficiary.findMany({
+        where: {
+          card_number: { in: cardNumbers },
+          deleted_at: null, // تجاهل السجلات المحذوفة ناعماً حتى يمكن إعادة استيرادها
+        },
+        select: {
+          card_number: true,
+        },
+      });
+
+      const existingCards = new Set(existing.map((item) => item.card_number));
+      const rowsToInsert = chunk.filter((row) => !existingCards.has(row.card_number));
+      duplicateRows += chunk.length - rowsToInsert.length;
+      processedRows += chunk.length;
+
+      if (rowsToInsert.length > 0) {
+        const result = await prisma.beneficiary.createMany({
+          data: rowsToInsert.map((row) => ({
+            card_number: row.card_number,
+            name: row.name,
+            birth_date: row.birth_date,
+            total_balance: INITIAL_BALANCE,
+            remaining_balance: INITIAL_BALANCE,
+            status: "ACTIVE" as const,
+          })),
+        });
+        insertedRows += result.count;
+      }
+
+      await prisma.importJob.update({
+        where: { id: currentJob.id },
+        data: {
+          processed_rows: processedRows,
+          inserted_rows: insertedRows,
+          duplicate_rows: duplicateRows,
+          failed_rows: failedRows,
+        },
+      });
+
+      await yieldToEventLoop();
+    }
+
+    const completedJob = await prisma.importJob.update({
+      where: { id: currentJob.id },
+      data: {
+        status: "COMPLETED",
+        processed_rows: currentJob.total_rows,
+        inserted_rows: insertedRows,
+        duplicate_rows: duplicateRows,
+        failed_rows: failedRows,
+        completed_at: new Date(),
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        user: username,
+        action: "IMPORT_BENEFICIARIES_BACKGROUND",
+        metadata: {
+          jobId: currentJob.id,
+          totalRows: currentJob.total_rows,
+          insertedRows,
+          duplicateRows,
+          failedRows,
+        },
+      },
+    });
+
+    revalidatePath("/dashboard");
+    revalidatePath("/import");
+    revalidatePath("/beneficiaries");
+
+    return { job: toSnapshot(completedJob) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "حدث خطأ أثناء معالجة الاستيراد.";
+    const failedJob = await prisma.importJob.update({
+      where: { id: currentJob.id },
+      data: {
+        status: "FAILED",
+        error_message: message,
+        completed_at: new Date(),
+      },
+    });
+
+    return { job: toSnapshot(failedJob), error: message };
+  }
+}

@@ -1,0 +1,201 @@
+"use client";
+
+import React, { useEffect, useState } from "react";
+import { Upload, FileSpreadsheet, AlertCircle, Loader2, RefreshCw } from "lucide-react";
+import { Button, Card } from "./ui";
+
+type ImportJobStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
+
+type ImportJobSnapshot = {
+  id: string;
+  status: ImportJobStatus;
+  totalRows: number;
+  processedRows: number;
+  insertedRows: number;
+  duplicateRows: number;
+  failedRows: number;
+  errorMessage: string | null;
+  progress: number;
+};
+
+export function ImportUploader() {
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState<{ error?: string } | null>(null);
+  const [job, setJob] = useState<ImportJobSnapshot | null>(null);
+
+  useEffect(() => {
+    if (!job || (job.status !== "PENDING" && job.status !== "PROCESSING")) {
+      return;
+    }
+
+    const timer = window.setInterval(async () => {
+      const response = await fetch(`/api/import-jobs/${job.id}`, { method: "GET" });
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = await response.json() as { job: ImportJobSnapshot };
+      setJob(payload.job);
+    }, 1200);
+
+    return () => window.clearInterval(timer);
+  }, [job]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setFile(e.target.files[0]);
+      setResult(null);
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!file) return;
+    setUploading(true);
+    setResult(null);
+    setJob(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/import-jobs", {
+        method: "POST",
+        body: formData,
+      });
+
+      const payload = await response.json() as { error?: string; job?: ImportJobSnapshot };
+      if (!response.ok || payload.error || !payload.job) {
+        setResult({ error: payload.error ?? "تعذر إنشاء مهمة الاستيراد." });
+        return;
+      }
+
+      setJob(payload.job);
+      void fetch(`/api/import-jobs/${payload.job.id}/run`, { method: "POST" });
+    } catch {
+      setResult({ error: "تعذر رفع الملف أو بدء مهمة الاستيراد." });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const isBusy = uploading || job?.status === "PENDING" || job?.status === "PROCESSING";
+  const isCompleted = job?.status === "COMPLETED";
+  const isFailed = job?.status === "FAILED";
+
+  return (
+    <div className="space-y-6 max-w-xl mx-auto">
+      <Card className="border border-slate-200 p-6 text-center sm:p-8">
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-primary">
+          <FileSpreadsheet className="h-7 w-7" />
+        </div>
+        <div>
+          <h3 className="text-lg font-black text-slate-900">رفع ملف المستفيدين</h3>
+          <p className="mx-auto mt-2 max-w-xs text-sm leading-7 text-slate-500">
+            اختر ملف Excel يحتوي على الحقول <b>card_number</b> و <b>name</b> ويمكنه أن يتضمن <b>birth_date</b> أو <b>date_of_birth</b>.
+          </p>
+        </div>
+        
+        <input
+          type="file"
+          id="file-upload"
+          className="hidden"
+          accept=".xlsx,.xls"
+          onChange={handleFileChange}
+        />
+        
+        <div className="mx-auto mt-5 flex w-full max-w-sm flex-col items-center space-y-3">
+          <Button 
+            variant="outline" 
+            className="h-12 w-full"
+            disabled={isBusy}
+            onClick={() => document.getElementById("file-upload")?.click()}
+          >
+            {file ? file.name : "اختيار الملف"}
+          </Button>
+          
+          <Button 
+            className="w-full h-12"
+            disabled={!file || isBusy}
+            onClick={handleUpload}
+          >
+            {isBusy ? (
+              <Loader2 className="ml-2 h-5 w-5 animate-spin" />
+            ) : (
+              <Upload className="h-5 w-5" />
+            )}
+            <span className="mr-2">{isBusy ? "جارٍ رفع الملف وبدء المهمة" : "بدء الاستيراد بالخلفية"}</span>
+          </Button>
+        </div>
+      </Card>
+
+      {job && (
+        <Card className="border border-slate-200 p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h4 className="text-base font-black text-slate-900">حالة الاستيراد</h4>
+              <p className="mt-1 text-sm text-slate-500">
+                {job.status === "PENDING" && "تم إنشاء المهمة وجارٍ بدء التنفيذ."}
+                {job.status === "PROCESSING" && "يمكنك متابعة العمل على الصفحة بينما يستمر الاستيراد في الخلفية."}
+                {job.status === "COMPLETED" && "اكتملت المهمة بنجاح."}
+                {job.status === "FAILED" && "توقفت المهمة بسبب خطأ ويمكن إعادة المحاولة بملف جديد."}
+              </p>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-black text-slate-700">
+              {job.progress}%
+            </div>
+          </div>
+
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full bg-primary transition-all" style={{ width: `${job.progress}%` }} />
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-center">
+              <p className="text-xs text-slate-500">تمت المعالجة</p>
+              <p className="mt-1 text-lg font-black text-slate-900">{job.processedRows}/{job.totalRows}</p>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-center">
+              <p className="text-xs text-slate-500">تمت الإضافة</p>
+              <p className="mt-1 text-lg font-black text-emerald-700">{job.insertedRows}</p>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-center">
+              <p className="text-xs text-slate-500">مكرر</p>
+              <p className="mt-1 text-lg font-black text-amber-700">{job.duplicateRows}</p>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-center">
+              <p className="text-xs text-slate-500">فشل</p>
+              <p className="mt-1 text-lg font-black text-red-700">{job.failedRows}</p>
+            </div>
+          </div>
+
+          {(isCompleted || isFailed) && (
+            <div className={`mt-4 rounded-md border p-4 ${isCompleted ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-red-200 bg-red-50 text-red-700"}`}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-black">{isCompleted ? "اكتمل الاستيراد" : "فشل الاستيراد"}</p>
+                  <p className="mt-1 text-sm">{job.errorMessage ?? (isCompleted ? "تم تحديث البيانات ويمكنك الآن مراجعة المستفيدين." : "تحقق من الملف ثم أعد المحاولة.")}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setJob(null)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-current/20 bg-white/70"
+                  title="إخفاء"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {result?.error && (
+        <div className="flex items-center rounded-md border border-red-200 bg-red-50 p-4 text-red-700">
+          <AlertCircle className="ml-3 h-5 w-5" />
+          <p className="font-medium text-sm">{result.error}</p>
+        </div>
+      )}
+    </div>
+  );
+}

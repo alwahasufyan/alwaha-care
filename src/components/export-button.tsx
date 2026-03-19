@@ -1,0 +1,31 @@
+"use client";
+
+import { Button } from "@/components/ui";
+import { Download } from "lucide-react";
+
+interface ExportButtonProps {
+  searchParams: Record<string, string | undefined>;
+}
+
+export function ExportButton({ searchParams }: ExportButtonProps) {
+  const handleExport = () => {
+    const params = new URLSearchParams();
+    Object.entries(searchParams).forEach(([key, value]) => {
+      if (value) params.append(key, value);
+    });
+    
+    // فتح الرابط في نافذة جديدة ليبدأ التحميل
+    window.open(`/api/export/transactions?${params.toString()}`, "_blank");
+  };
+
+  return (
+    <Button
+      type="button"
+      onClick={handleExport}
+      className="bg-emerald-600 hover:bg-emerald-700 text-white print:hidden h-10 px-4 flex items-center gap-2"
+    >
+      <Download className="h-4 w-4" />
+      تصدير Excel
+    </Button>
+  );
+}

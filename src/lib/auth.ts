@@ -1,0 +1,84 @@
+import { SignJWT, jwtVerify } from "jose";
+import { cookies } from "next/headers";
+import { NextRequest, NextResponse } from "next/server";
+
+const secretKey = process.env.JWT_SECRET;
+if (!secretKey) throw new Error("JWT_SECRET environment variable is not set");
+const key = new TextEncoder().encode(secretKey);
+
+export async function encrypt(payload: Record<string, unknown>) {
+  return await new SignJWT(payload)
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime("24h")
+    .sign(key);
+}
+
+export async function decrypt(input: string): Promise<Record<string, unknown>> {
+  const { payload } = await jwtVerify(input, key, {
+    algorithms: ["HS256"],
+  });
+  return payload;
+}
+
+export async function login(user: { id: string; name: string; username: string; is_admin: boolean; must_change_password: boolean }) {
+  const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const session = await encrypt(user);
+
+  (await cookies()).set("session", session, {
+    expires,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+  });
+}
+
+export async function logout() {
+  (await cookies()).set("session", "", {
+    expires: new Date(0),
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+  });
+}
+
+export interface Session {
+  id: string;
+  name: string;
+  username: string;
+  is_admin: boolean;
+  must_change_password: boolean;
+  expires?: Date;
+}
+
+export async function getSession(): Promise<Session | null> {
+  const session = (await cookies()).get("session")?.value;
+  if (!session) return null;
+  try {
+    return await decrypt(session) as unknown as Session;
+  } catch {
+    return null;
+  }
+}
+
+export async function updateSession(request: NextRequest) {
+  const session = request.cookies.get("session")?.value;
+  if (!session) return;
+
+  // Refresh the session so it doesn't expire
+  const parsed = await decrypt(session);
+  parsed.expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const res = NextResponse.next();
+  res.cookies.set({
+    name: "session",
+    value: await encrypt(parsed as Record<string, unknown>),
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+    expires: parsed.expires as Date,
+  });
+  return res;
+}
