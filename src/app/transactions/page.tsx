@@ -338,7 +338,7 @@ export default async function TransactionsPage({
             <div className="flex gap-2">
               {page > 1 ? (
                 <Link
-                  href={`/transactions?${new URLSearchParams({ ...(date ? { date } : {}), ...(facility_id ? { facility_id } : {}), ...(q ? { q } : {}), page: String(page - 1) }).toString()}`}
+                  href={`/transactions?${new URLSearchParams({ ...(start_date ? { start_date } : {}), ...(end_date ? { end_date } : {}), ...(facility_id ? { facility_id } : {}), ...(q ? { q } : {}), page: String(page - 1) }).toString()}`}
                   className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 transition-colors hover:bg-slate-50"
                 >
                   &#8592; السابق
@@ -350,7 +350,7 @@ export default async function TransactionsPage({
               )}
               {page < totalPages ? (
                 <Link
-                  href={`/transactions?${new URLSearchParams({ ...(date ? { date } : {}), ...(facility_id ? { facility_id } : {}), ...(q ? { q } : {}), page: String(page + 1) }).toString()}`}
+                  href={`/transactions?${new URLSearchParams({ ...(start_date ? { start_date } : {}), ...(end_date ? { end_date } : {}), ...(facility_id ? { facility_id } : {}), ...(q ? { q } : {}), page: String(page + 1) }).toString()}`}
                   className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 transition-colors hover:bg-slate-50"
                 >
                   التالي &#8594;
