@@ -72,7 +72,7 @@ export default async function FacilitiesPage({
         {/* ترويسة الطباعة فقط */}
         <div className="hidden print:flex flex-col items-center justify-center mb-6 text-center border-b pb-4 pt-4">
            {/* eslint-disable-next-line @next/next/no-img-element */}
-           <img src="/logo.svg" alt="Waha Healthy Care" className="h-16 w-auto object-contain mb-3" />
+           <img src="/logo.png" alt="Waha Healthy Care" className="h-20 w-auto object-contain mb-3" />
            <h1 className="text-xl font-black text-black">Waha Healthy Care</h1>
            <h2 className="text-lg font-bold text-black mt-1">تقرير المرافق الصحية المسجلة</h2>
            <p className="text-sm text-black mt-1 opacity-75">تاريخ استخراج التقرير: {new Date().toLocaleDateString("ar-LY")}</p>

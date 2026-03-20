@@ -12,12 +12,9 @@ export const metadata: Metadata = {
   title: "Waha Healthy Care",
   description: "Waha Healthy Care",
   icons: {
-    icon: [
-      { url: "/logo.png", type: "image/png" },
-      { url: "/logo.svg", type: "image/svg+xml" },
-    ],
-    shortcut: "/logo.png",
-    apple: "/logo.png",
+    icon: "/icon.png",
+    shortcut: "/icon.png",
+    apple: "/icon.png",
   },
 };
 
