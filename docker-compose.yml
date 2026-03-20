@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: wahda_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wahda
+      POSTGRES_USER: wahda
+      POSTGRES_PASSWORD: wahda_password
+    ports:
+      - "${DB_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wahda -d wahda"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wahda_app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://wahda:wahda_password@db:5432/wahda?schema=public
+      JWT_SECRET: change-this-secret-in-production
+      INITIAL_BALANCE: 600
+      PORT: 3000
+    ports:
+      - "${APP_HOST_PORT:-3101}:3000"
+
+volumes:
+  postgres_data:

@@ -1,0 +1,13 @@
+node_modules
+npm-debug.log
+.next
+.git
+.gitignore
+.vscode
+Dockerfile
+docker-compose*.yml
+.env
+.env.*
+README.md
+waad-logo-DQNTDvBH.png
+wahda.xlsx

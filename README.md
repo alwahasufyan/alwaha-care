@@ -1,36 +1,138 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Wahda Website
 
-## Getting Started
+تطبيق ويب مبني على Next.js + Prisma + PostgreSQL لإدارة المستفيدين والخصومات والمنشآت.
 
-First, run the development server:
+## المتطلبات
+
+- Node.js 20+
+- npm 10+
+- PostgreSQL 14+
+
+## متغيرات البيئة المطلوبة
+
+المشروع يحتاج المتغيرات التالية:
+
+- DATABASE_URL
+- JWT_SECRET
+- INITIAL_BALANCE (اختياري، الافتراضي 600)
+
+تم إضافة ملفات جاهزة كنقطة بداية:
+
+- .env.example للتطوير المحلي
+- .env.production.example للإنتاج
+
+## تشغيل المشروع محلياً بدون Docker
+
+1. تثبيت الحزم:
+
+```bash
+npm install
+```
+
+2. نسخ ملف البيئة:
+
+```bash
+cp .env.example .env
+```
+
+على Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+3. إنشاء الجداول (Prisma migrations):
+
+```bash
+npx prisma migrate deploy
+```
+
+4. تشغيل وضع التطوير:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+التطبيق يعمل على:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+http://localhost:3000
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## تشغيل المشروع محلياً عبر Docker
 
-## Learn More
+تم إضافة الملفات التالية:
 
-To learn more about Next.js, take a look at the following resources:
+- Dockerfile (Multi-stage build للإنتاج)
+- docker-compose.yml (app + postgres)
+- .dockerignore
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+تشغيل الخدمات:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+docker compose up -d --build
+```
 
-## Deploy on Vercel
+المنفذ الخارجي الافتراضي للتطبيق في Docker هو 3101 (وليس 3000).
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+لتغييره، عدل APP_HOST_PORT في ملف .env أو مرره مباشرة وقت التشغيل:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+APP_HOST_PORT=9091 docker compose up -d --build
+```
+
+على Windows PowerShell:
+
+```powershell
+$env:APP_HOST_PORT="9091"; docker compose up -d --build
+```
+
+إيقاف الخدمات:
+
+```bash
+docker compose down
+```
+
+إيقاف الخدمات مع حذف بيانات قاعدة البيانات المحلية:
+
+```bash
+docker compose down -v
+```
+
+## تشغيل المشروع على سيرفر إنتاج
+
+تم إضافة docker-compose.prod.yml لتشغيل خدمة التطبيق فقط (مع قاعدة بيانات خارجية Managed أو سيرفر منفصل).
+
+1. أنشئ ملف البيئة للإنتاج:
+
+```bash
+cp .env.production.example .env.production
+```
+
+2. عدل .env.production وضع بيانات قاعدة الإنتاج وJWT_SECRET قوي.
+
+يمكنك أيضاً تحديد منفذ الاستضافة الخارجي عبر APP_HOST_PORT (مثال: 9091).
+
+3. شغّل التطبيق:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+4. لمتابعة السجلات:
+
+```bash
+docker compose -f docker-compose.prod.yml logs -f
+```
+
+## ملاحظات مهمة للإنتاج
+
+- استخدم JWT_SECRET عشوائي وطويل.
+- يفضّل استخدام قاعدة بيانات PostgreSQL مُدارة أو مؤمنة بنسخ احتياطي.
+- افتح المنفذ 3000 فقط إذا كنت تربط التطبيق مباشرة، أو اربطه خلف Nginx/Caddy كـ reverse proxy مع HTTPS.
+- داخل الحاوية يعمل Next.js على المنفذ 3000، أما المنفذ الخارجي في السيرفر فتتحكم به عبر APP_HOST_PORT.
+- عند تشغيل الحاوية، يتم تنفيذ:
+
+```bash
+npx prisma migrate deploy
+```
+
+تلقائياً قبل تشغيل Next.js لضمان تحديث قاعدة البيانات.
