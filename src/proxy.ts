@@ -69,5 +69,6 @@ export default async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+  // استثناء كل الملفات الثابتة (مثل logo.png/css/js/fonts) من الـ middleware
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\..*).*)"],
 };
