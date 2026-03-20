@@ -34,13 +34,22 @@ export function Shell({ children, facilityName, isAdmin = false }: { children: R
                   <h2 className="text-sm font-black leading-tight text-slate-900">Waha Healthy Care</h2>
                 </div>
               </div>
-              <button
-                onClick={() => logout()}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-500 transition-colors hover:bg-slate-50 hover:text-red-600 lg:hidden"
-                title="تسجيل الخروج"
-              >
-                <LogOut className="h-5 w-5" />
-              </button>
+              <div className="flex items-center gap-2 lg:hidden">
+                <Link
+                  href="/settings"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-500 transition-colors hover:bg-slate-50 hover:text-primary"
+                  title="تغيير كلمة المرور"
+                >
+                  <KeyRound className="h-4 w-4" />
+                </Link>
+                <button
+                  onClick={() => logout()}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-500 transition-colors hover:bg-slate-50 hover:text-red-600"
+                  title="تسجيل الخروج"
+                >
+                  <LogOut className="h-5 w-5" />
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
