@@ -3,6 +3,8 @@
 import prisma from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
+import { Prisma } from "@prisma/client";
+import { logger } from "@/lib/logger";
 
 export async function cancelTransaction(transactionId: string) {
   try {
@@ -30,48 +32,49 @@ export async function cancelTransaction(transactionId: string) {
 
     const amount = Number(transaction.amount);
 
-    await prisma.$transaction(async (tx) => {
-      // 1. Mark original transaction as cancelled
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // 1. قفل صف المستفيد لمنع race condition
+      const locked = await tx.$queryRaw<Array<{ id: string; remaining_balance: number }>>`
+        SELECT id, remaining_balance FROM "Beneficiary"
+        WHERE id = ${transaction.beneficiary_id}
+        FOR UPDATE
+      `;
+
+      if (locked.length === 0) {
+        throw new Error("المستفيد غير موجود");
+      }
+
+      const currentBalance = Number(locked[0].remaining_balance);
+      const newBalance = currentBalance + amount;
+
+      // 2. Mark original transaction as cancelled
       await tx.transaction.update({
         where: { id: transactionId },
         data: { is_cancelled: true },
       });
 
-      // 2. Update beneficiary balance (Refund amount)
-      // Since original transaction deducted amount, we add it back.
-      const newBalance = Number(transaction.beneficiary.remaining_balance) + amount;
-      
-      // Update status if needed (e.g. if balance becomes positive again, status = ACTIVE)
-      // Assuming initial balance is > 0. If balance > 0, ACTIVE.
-      const newStatus = newBalance > 0 ? "ACTIVE" : "FINISHED"; 
-      // Actually, logic for status might be simpler: if balance > 0, ACTIVE.
-
+      // 3. Update beneficiary balance with locked value
       await tx.beneficiary.update({
         where: { id: transaction.beneficiary_id },
         data: {
           remaining_balance: newBalance,
-          status: "ACTIVE", // Always active if we refund money usually
+          status: "ACTIVE",
         },
       });
 
-      // 3. Create new cancellation transaction
-      // We use NEGATIVE amount to represent refund in reports so sums are correct?
-      // Or consistent positive amount but type CANCELLATION?
-      // If we use positive amount for CANCELLATION, then sum(amount) will be 2x.
-      // So meaningful accounting requires negative amount or type-based logic.
-      // Let's use negative amount for CANCELLATION type transactions to keep sums correct.
+      // 4. Create cancellation transaction
       await tx.transaction.create({
         data: {
           beneficiary_id: transaction.beneficiary_id,
-          facility_id: session.id, // Or original facility? Usually the admin (current user) cancels it.
-          amount: -amount, // Negative to offset
+          facility_id: session.id,
+          amount: -amount,
           type: "CANCELLATION",
-          is_cancelled: false, // This transaction itself is executed (it's a cancellation action)
+          is_cancelled: false,
           original_transaction_id: transactionId,
         },
       });
 
-      // 4. Audit Log
+      // 5. Audit Log
       await tx.auditLog.create({
         data: {
           facility_id: session.id,
@@ -91,7 +94,7 @@ export async function cancelTransaction(transactionId: string) {
     
     return { success: true };
   } catch (error) {
-    console.error("Cancellation error:", error);
+    logger.error("Cancellation error", { error: String(error) });
     return { error: "فشل في إلغاء المعاملة" };
   }
 }

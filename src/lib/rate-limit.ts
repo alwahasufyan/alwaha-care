@@ -1,6 +1,6 @@
 /**
  * In-memory rate limiter — مناسب للنشر الفردي (single instance).
- * يتتبع عدد المحاولات لكل username خلال نافذة زمنية محددة.
+ * يتتبع عدد المحاولات لكل مفتاح خلال نافذة زمنية محددة.
  */
 
 interface Bucket {
@@ -11,23 +11,40 @@ interface Bucket {
 // Map<key, Bucket> — لا تحتاج مكتبة خارجية
 const store = new Map<string, Bucket>();
 
-const WINDOW_MS = 15 * 60 * 1000; // نافذة 15 دقيقة
-const MAX_ATTEMPTS = 10;           // 10 محاولات كحد أقصى قبل الحجب
+// ── حدود مختلفة حسب نوع العملية ──
+interface RateLimitConfig {
+  windowMs: number;
+  maxAttempts: number;
+}
+
+const RATE_LIMITS: Record<string, RateLimitConfig> = {
+  login:   { windowMs: 15 * 60 * 1000, maxAttempts: 7 },    // 7 محاولات / 15 دقيقة
+  search:  { windowMs: 60 * 1000,       maxAttempts: 60 },   // 60 طلب / دقيقة
+  deduct:  { windowMs: 60 * 1000,       maxAttempts: 30 },   // 30 عملية / دقيقة
+  api:     { windowMs: 60 * 1000,       maxAttempts: 100 },  // 100 طلب / دقيقة
+};
+
+const DEFAULT_CONFIG: RateLimitConfig = { windowMs: 15 * 60 * 1000, maxAttempts: 10 };
 
 /** يُرجع null إذا مسموح، أو رسالة خطأ إذا تجاوز الحد */
-export function checkRateLimit(key: string): string | null {
+export function checkRateLimit(key: string, category: string = "login"): string | null {
+  const config = RATE_LIMITS[category] ?? DEFAULT_CONFIG;
   const now = Date.now();
   const bucket = store.get(key);
 
   if (!bucket || now >= bucket.resetAt) {
     // نافذة جديدة
-    store.set(key, { count: 1, resetAt: now + WINDOW_MS });
+    store.set(key, { count: 1, resetAt: now + config.windowMs });
     return null;
   }
 
-  if (bucket.count >= MAX_ATTEMPTS) {
-    const remainingMinutes = Math.ceil((bucket.resetAt - now) / 60000);
-    return `تم تجاوز الحد المسموح به. يرجى المحاولة بعد ${remainingMinutes} دقيقة.`;
+  if (bucket.count >= config.maxAttempts) {
+    const remainingSec = Math.ceil((bucket.resetAt - now) / 1000);
+    if (remainingSec > 60) {
+      const remainingMinutes = Math.ceil(remainingSec / 60);
+      return `تم تجاوز الحد المسموح به. يرجى المحاولة بعد ${remainingMinutes} دقيقة.`;
+    }
+    return `تم تجاوز الحد المسموح به. يرجى المحاولة بعد ${remainingSec} ثانية.`;
   }
 
   bucket.count += 1;

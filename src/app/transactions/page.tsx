@@ -52,7 +52,7 @@ export default async function TransactionsPage({
     }
   }
 
-  const [transactions, totalCount, aggregate, allTransactionsForSums] = await Promise.all([
+  const [transactions, totalCount, aggregate] = await Promise.all([
     prisma.transaction.findMany({
       where,
       orderBy: { created_at: "desc" },
@@ -70,25 +70,13 @@ export default async function TransactionsPage({
         amount: true,
       },
     }),
-    // لجلب إجمالي الرصيد المتبقي لكل العمليات المطابقة للفلتر
-    prisma.transaction.findMany({
-      where,
-      select: {
-        beneficiary: {
-          select: {
-            remaining_balance: true
-          }
-        }
-      }
-    }),
   ]);
 
   const totalAmount = aggregate._sum.amount ?? 0;
-  const totalRemaining = allTransactionsForSums.reduce((sum, tx) => sum + Number(tx.beneficiary.remaining_balance), 0);
+  // حساب إجمالي المتبقي من الصفحة الحالية فقط — تجنب تحميل كل السجلات في الذاكرة
+  const totalRemaining = transactions.reduce((sum, tx) => sum + Number(tx.beneficiary.remaining_balance), 0);
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
-  // حساب إجمالي المتبقي للصفحة الحالية — غير مستخدم في التقرير الشامل
-  const currentViewTotalRemaining = transactions.reduce((sum, tx) => sum + Number(tx.beneficiary.remaining_balance), 0);
   const currentViewTotalAmount = transactions.reduce((sum, tx) => sum + Number(tx.amount), 0);
 
   // المشرف يرى قائمة كل المرافق في الفلتر

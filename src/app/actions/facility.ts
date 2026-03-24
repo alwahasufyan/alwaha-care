@@ -65,8 +65,24 @@ export async function updateFacility(data: {
   const updateData: Record<string, unknown> = { name, username };
 
   if (data.resetPassword) {
-    updateData.password_hash = await bcrypt.hash("123456", 10);
+    // كلمة مرور عشوائية مؤقتة — المستخدم مُجبر على تغييرها عند أول دخول
+    const crypto = await import("crypto");
+    const tempPassword = crypto.randomBytes(6).toString("base64url");
+    updateData.password_hash = await bcrypt.hash(tempPassword, 10);
     updateData.must_change_password = true;
+
+    await prisma.facility.update({ where: { id }, data: updateData });
+    await prisma.auditLog.create({
+      data: {
+        facility_id: session.id,
+        user: session.username,
+        action: "UPDATE_FACILITY",
+        metadata: { facility_id: id, name, username, reset_password: true },
+      },
+    });
+    revalidatePath("/admin/facilities");
+    // يُعاد في الاستجابة ليُعرض للمشرف مرة واحدة فقط
+    return { success: true, tempPassword };
   }
 
   await prisma.facility.update({ where: { id }, data: updateData });
@@ -211,20 +227,27 @@ export async function importFacilitiesFromExcel(formData: FormData): Promise<{
   const newFacilities = validRows.filter((r) => !existingUsernames.has(r.username));
   const skipped = validRows.length - newFacilities.length;
 
-  // ── 3. hash كلمة المرور مرة واحدة (نفس الكلمة الافتراضية للجميع) ───────
-  const defaultHash = await bcrypt.hash("123456", 10);
+  // ── 3. كلمة مرور عشوائية لكل مرفق جديد ─────────────────────────────────
+  const crypto = await import("crypto");
+  const facilityData = await Promise.all(
+    newFacilities.map(async (f) => {
+      const tempPassword = crypto.randomBytes(6).toString("base64url");
+      const password_hash = await bcrypt.hash(tempPassword, 10);
+      return {
+        name: f.name,
+        username: f.username,
+        password_hash,
+        is_admin: false,
+        must_change_password: true,
+      };
+    })
+  );
 
   // ── 4. إدراج دفعي (createMany) ──────────────────────────────────────────
   let created = 0;
-  if (newFacilities.length > 0) {
+  if (facilityData.length > 0) {
     const result = await prisma.facility.createMany({
-      data: newFacilities.map((f) => ({
-        name: f.name,
-        username: f.username,
-        password_hash: defaultHash,
-        is_admin: false,
-        must_change_password: true,
-      })),
+      data: facilityData,
       skipDuplicates: true,
     });
     created = result.count;

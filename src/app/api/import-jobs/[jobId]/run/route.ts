@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { processImportJob } from "@/lib/import-jobs";
+import { logger } from "@/lib/logger";
 
 export async function POST(
   _request: Request,
@@ -19,7 +20,7 @@ export async function POST(
   void Promise.resolve().then(async () => {
     await processImportJob(jobId, session.username);
   }).catch((err: unknown) => {
-    console.error(`[import-job] uncaught error — jobId=${jobId}`, err);
+    logger.error("Import job uncaught error", { jobId, error: String(err) });
   });
 
   return NextResponse.json({ accepted: true, jobId }, { status: 202 });

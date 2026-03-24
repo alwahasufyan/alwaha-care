@@ -3,11 +3,22 @@ import { PrismaClient } from "@prisma/client";
 const prismaClientSingleton = () => {
   return new PrismaClient({
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
-    // حد الاتصالات المتزامنة — اضبط DATABASE_URL مع ?connection_limit=<N>&pool_timeout=20
-    // لضبط دقيق لـ connection pool في بيئة الإنتاج:
-    // DATABASE_URL="postgresql://user:pass@host:5432/db?connection_limit=10&pool_timeout=20&connect_timeout=10"
+    datasourceUrl: appendPoolParams(process.env.DATABASE_URL ?? ""),
   });
 };
+
+/** يضيف connection_limit و pool_timeout إذا لم تكن موجودة في DATABASE_URL */
+function appendPoolParams(url: string): string {
+  if (!url) return url;
+  try {
+    const u = new URL(url);
+    if (!u.searchParams.has("connection_limit")) u.searchParams.set("connection_limit", "10");
+    if (!u.searchParams.has("pool_timeout")) u.searchParams.set("pool_timeout", "20");
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
 
 declare global {
   var prisma: undefined | ReturnType<typeof prismaClientSingleton>;
