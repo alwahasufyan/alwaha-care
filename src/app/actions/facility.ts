@@ -8,6 +8,8 @@ import { createFacilitySchema, updateFacilitySchema } from "@/lib/validation";
 import ExcelJS from "exceljs";
 import { revalidatePath } from "next/cache";
 
+const DEFAULT_FACILITY_PASSWORD = process.env.DEFAULT_FACILITY_PASSWORD ?? "123456";
+
 export async function createFacility(prevState: unknown, formData: FormData) {
   const session = await getSession();
   if (!session?.is_admin) {
@@ -65,9 +67,8 @@ export async function updateFacility(data: {
   const updateData: Record<string, unknown> = { name, username };
 
   if (data.resetPassword) {
-    // كلمة مرور عشوائية مؤقتة — المستخدم مُجبر على تغييرها عند أول دخول
-    const crypto = await import("crypto");
-    const tempPassword = crypto.randomBytes(6).toString("base64url");
+    // إعادة تعيين إلى كلمة مرور افتراضية متفق عليها (قابلة للتخصيص عبر ENV)
+    const tempPassword = DEFAULT_FACILITY_PASSWORD;
     updateData.password_hash = await bcrypt.hash(tempPassword, 10);
     updateData.must_change_password = true;
 
@@ -228,10 +229,10 @@ export async function importFacilitiesFromExcel(formData: FormData): Promise<{
   const skipped = validRows.length - newFacilities.length;
 
   // ── 3. كلمة مرور عشوائية لكل مرفق جديد ─────────────────────────────────
-  const crypto = await import("crypto");
+  // نعتمد كلمة مرور افتراضية موحدة حتى تكون معروفة للمشرف والمستخدمين
   const facilityData = await Promise.all(
     newFacilities.map(async (f) => {
-      const tempPassword = crypto.randomBytes(6).toString("base64url");
+      const tempPassword = DEFAULT_FACILITY_PASSWORD;
       const password_hash = await bcrypt.hash(tempPassword, 10);
       return {
         name: f.name,
