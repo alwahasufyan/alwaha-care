@@ -2,6 +2,7 @@
 
 import prisma from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
+import { checkRateLimit } from "@/lib/rate-limit";
 import { updateBeneficiarySchema } from "@/lib/validation";
 import { revalidatePath } from "next/cache";
 
@@ -10,6 +11,13 @@ export async function getBeneficiaryByCard(card_number: string) {
   if (!session) {
     return { error: "غير مصرح" };
   }
+
+  if (!card_number || card_number.length > 50) {
+    return { error: "رقم البطاقة غير صالح" };
+  }
+
+  const rateLimitError = checkRateLimit(`search:${session.id}`, "search");
+  if (rateLimitError) return { error: rateLimitError };
 
   try {
     const beneficiary = await prisma.beneficiary.findFirst({
@@ -32,8 +40,11 @@ export async function searchBeneficiaries(query: string) {
     return { error: "غير مصرح", items: [] as Array<{ id: string; name: string; card_number: string; remaining_balance: number; status: string }> };
   }
 
+  const rateLimitError = checkRateLimit(`search:${session.id}`, "search");
+  if (rateLimitError) return { error: rateLimitError, items: [] as Array<{ id: string; name: string; card_number: string; remaining_balance: number; status: string }> };
+
   const q = query.trim();
-  if (q.length < 2) {
+  if (q.length < 2 || q.length > 100) {
     return { items: [] as Array<{ id: string; name: string; card_number: string; remaining_balance: number; status: string }> };
   }
 

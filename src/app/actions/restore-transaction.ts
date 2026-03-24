@@ -3,6 +3,8 @@
 import prisma from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
+import { Prisma } from "@prisma/client";
+import { logger } from "@/lib/logger";
 
 export async function deleteCancellationTransaction(cancellationId: string) {
   try {
@@ -28,40 +30,31 @@ export async function deleteCancellationTransaction(cancellationId: string) {
       return { error: "لا يوجد معرف للمعاملة الأصلية" };
     }
 
-    const amount = Number(cancellationTransaction.amount); // This is negative e.g. -100
-    // If we undo the cancellation, we need to DEDUCT the money again.
-    // The cancellation added -amount (effectively +100 if we consider remaining balance logic: bal = bal - tx_amount).
-    // Wait, the logic used in cancelTransaction was:
-    // `newBalance = remaining_balance + amount` (where amount was the positive deduction value).
-    // And `cancellationTransaction.amount` is explicitly negative (-amount).
-    
-    // To revert:
-    // 1. Mark original transaction `is_cancelled = false`
-    // 2. Reduce the beneficiary balance by `amount` (the positive value).
-    // cancellationTransaction.amount is e.g. -100.
-    // So if we just delete it, we effectivelly revert the balance change it caused? No, we updated the balance separately.
-    
-    // Logic to revert:
-    // original amount: 100.
-    // cancel: bal += 100. cancellation tx: -100.
-    // revert cancel: bal -= 100. original tx: is_cancelled=false. delete cancellation tx.
+    const refundAmountReversed = Math.abs(Number(cancellationTransaction.amount));
 
-    const refundAmountReversed = Math.abs(amount); // 100
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // 1. قفل صف المستفيد لمنع race condition
+      const locked = await tx.$queryRaw<Array<{ id: string; remaining_balance: number }>>`
+        SELECT id, remaining_balance FROM "Beneficiary"
+        WHERE id = ${cancellationTransaction.beneficiary_id}
+        FOR UPDATE
+      `;
 
-    await prisma.$transaction(async (tx) => {
-      // 1. Mark original transaction as valid (not cancelled)
+      if (locked.length === 0) {
+        throw new Error("المستفيد غير موجود");
+      }
+
+      const currentBalance = Number(locked[0].remaining_balance);
+      const newBalance = currentBalance - refundAmountReversed;
+      const newStatus = newBalance <= 0 ? "FINISHED" : "ACTIVE";
+
+      // 2. Mark original transaction as valid (not cancelled)
       await tx.transaction.update({
         where: { id: cancellationTransaction.original_transaction_id! },
         data: { is_cancelled: false },
       });
 
-      // 2. Update beneficiary balance (Re-deduct amount)
-      const currentBalance = Number(cancellationTransaction.beneficiary.remaining_balance);
-      const newBalance = currentBalance - refundAmountReversed;
-      // Check if balance goes negative - allowed? Usually yes if it was valid before.
-      
-      const newStatus = newBalance <= 0 ? "FINISHED" : "ACTIVE";
-
+      // 3. Update beneficiary balance with locked value
       await tx.beneficiary.update({
         where: { id: cancellationTransaction.beneficiary_id },
         data: {
@@ -70,12 +63,12 @@ export async function deleteCancellationTransaction(cancellationId: string) {
         },
       });
 
-      // 3. Delete the cancellation transaction
+      // 4. Delete the cancellation transaction
       await tx.transaction.delete({
         where: { id: cancellationId },
       });
 
-      // 4. Audit Log
+      // 5. Audit Log
       await tx.auditLog.create({
         data: {
           facility_id: session.id,
@@ -96,7 +89,7 @@ export async function deleteCancellationTransaction(cancellationId: string) {
     return { success: true };
 
   } catch (error) {
-    console.error("Revert cancellation error:", error);
+    logger.error("Revert cancellation error", { error: String(error) });
     return { error: "فشل في التراجع عن الإلغاء" };
   }
 }

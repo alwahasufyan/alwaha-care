@@ -1,31 +1,29 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 /**
  * GET /api/health
  * نقطة فحص صحة الخدمة — تُستخدم من قِبل load balancers وأدوات المراقبة.
- * لا تتطلب تسجيل دخول — تُرجع 200 إذا كانت قاعدة البيانات متاحة، 503 إذا لا.
+ * محمية بمعدّل طلبات لمنع DoS.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const rateLimitError = checkRateLimit(`health:${ip}`, "api");
+  if (rateLimitError) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
   try {
-    // استعلام خفيف للتحقق من اتصال قاعدة البيانات
     await prisma.$queryRaw`SELECT 1`;
 
     return NextResponse.json(
-      {
-        status: "ok",
-        timestamp: new Date().toISOString(),
-        db: "connected",
-      },
+      { status: "ok", timestamp: new Date().toISOString() },
       { status: 200 }
     );
   } catch {
     return NextResponse.json(
-      {
-        status: "error",
-        timestamp: new Date().toISOString(),
-        db: "unreachable",
-      },
+      { status: "error", timestamp: new Date().toISOString() },
       { status: 503 }
     );
   }

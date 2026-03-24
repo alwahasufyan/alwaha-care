@@ -1,19 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { decrypt } from "@/lib/auth";
-import prisma from "@/lib/prisma";
 
 const publicRoutes = ["/login", "/api/login"];
 
+/**
+ * Middleware خفيف — يفحص JWT فقط ولا يستعلم من قاعدة البيانات.
+ * فحص حالة الحذف الناعم يتم عبر session-guard.ts في العمليات الحساسة.
+ */
 export default async function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname;
   const isPublicRoute = publicRoutes.includes(path);
 
   const cookie = req.cookies.get("session")?.value;
-  let session = null;
+  let session: { id: string; is_admin?: boolean; must_change_password?: boolean } | null = null;
 
   if (cookie) {
     try {
-      session = await decrypt(cookie) as { id: string; is_admin?: boolean; must_change_password?: boolean } | null;
+      session = await decrypt(cookie) as unknown as { id: string; is_admin?: boolean; must_change_password?: boolean };
     } catch {
       // رمز الجلسة غير صالح
     }
@@ -28,26 +31,6 @@ export default async function middleware(req: NextRequest) {
       return NextResponse.redirect(new URL("/change-password", req.nextUrl));
     }
     return NextResponse.redirect(new URL("/dashboard", req.nextUrl));
-  }
-
-  // ── التحقق من أن المرفق غير محذوف (حماية الجلسات النشطة) ──
-  // المشرفون لا يخضعون للحذف الناعم
-  if (session && !session.is_admin) {
-    const facility = await prisma.facility.findFirst({
-      where: { id: session.id, deleted_at: null },
-      select: { id: true },
-    });
-    if (!facility) {
-      const response = NextResponse.redirect(new URL("/login", req.nextUrl));
-      response.cookies.set("session", "", {
-        expires: new Date(0),
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-        path: "/",
-      });
-      return response;
-    }
   }
 
   // إجبار المستخدم على تغيير كلمة المرور قبل أي صفحة أخرى

@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { requireActiveFacilitySession } from "@/lib/session-guard";
+import { checkRateLimit } from "@/lib/rate-limit";
 import prisma from "@/lib/prisma";
+import { logger } from "@/lib/logger";
 import ExcelJS from "exceljs";
 
 export async function GET(request: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveFacilitySession();
   if (!session) {
     return new NextResponse("Unauthorized", { status: 401 });
+  }
+
+  const rateLimitError = checkRateLimit(`api:${session.id}`, "api");
+  if (rateLimitError) {
+    return NextResponse.json({ error: rateLimitError }, { status: 429 });
   }
 
   const { searchParams } = new URL(request.url);
@@ -44,10 +51,14 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // حد أقصى لعدد السجلات المُصدَّرة لمنع استهلاك الذاكرة الزائد
+  const EXPORT_LIMIT = 50_000;
+
   try {
     const transactions = await prisma.transaction.findMany({
       where,
       orderBy: { created_at: "desc" },
+      take: EXPORT_LIMIT,
       include: {
         beneficiary: true,
         facility: true,
@@ -111,15 +122,16 @@ export async function GET(request: NextRequest) {
 
     const buffer = await workbook.xlsx.writeBuffer();
 
-    return new NextResponse(buffer, {
+    return new NextResponse(Buffer.from(buffer as ArrayBuffer), {
       status: 200,
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": 'attachment; filename="transactions-report.xlsx"',
+        "Cache-Control": "no-store",
       },
     });
   } catch (error) {
-    console.error("Export error:", error);
+    logger.error("Export failed", { error: String(error) });
     return new NextResponse("Failed to generate report", { status: 500 });
   }
 }

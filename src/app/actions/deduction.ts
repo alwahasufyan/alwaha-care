@@ -2,9 +2,11 @@
 
 import prisma from "@/lib/prisma";
 import { deductionSchema } from "@/lib/validation";
+import { checkRateLimit } from "@/lib/rate-limit";
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { requireActiveFacilitySession } from "@/lib/session-guard";
+import { logger } from "@/lib/logger";
 
 export async function deductBalance(formData: {
   card_number: string;
@@ -15,6 +17,9 @@ export async function deductBalance(formData: {
   if (!session) {
     return { error: "غير مصرح لك بهذه العملية" };
   }
+
+  const rateLimitError = checkRateLimit(`deduct:${session.id}`, "deduct");
+  if (rateLimitError) return { error: rateLimitError };
 
   const validated = deductionSchema.safeParse(formData);
   if (!validated.success) {
@@ -93,7 +98,7 @@ export async function deductBalance(formData: {
     revalidatePath("/transactions");
     return result;
   } catch (error: unknown) {
-    console.error("Deduction error:", error);
+    logger.error("Deduction error", { error: String(error) });
     return { error: error instanceof Error ? error.message : "Failed to process deduction" };
   }
 }

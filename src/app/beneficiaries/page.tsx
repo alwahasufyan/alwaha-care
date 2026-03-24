@@ -41,7 +41,7 @@ export default async function BeneficiariesPage({
       }
     : baseFilter;
 
-  const [beneficiaries, totalCount, activeCount, deletedCount, filteredCount] = await Promise.all([
+  const [beneficiaries, filteredCount, statusCounts] = await Promise.all([
     prisma.beneficiary.findMany({
       where,
       orderBy: { created_at: "desc" },
@@ -49,11 +49,31 @@ export default async function BeneficiariesPage({
       take: PAGE_SIZE,
       include: { _count: { select: { transactions: true } } },
     }),
-    prisma.beneficiary.count({ where: { deleted_at: null } }),
-    prisma.beneficiary.count({ where: { deleted_at: null, status: "ACTIVE" } }),
-    prisma.beneficiary.count({ where: { deleted_at: { not: null } } }),
     prisma.beneficiary.count({ where }),
+    // استعلام واحد بدلاً من 3 استعلامات منفصلة
+    prisma.$queryRaw<Array<{ is_deleted: boolean; status: string; _count: bigint }>>`
+      SELECT
+        ("deleted_at" IS NOT NULL) AS is_deleted,
+        status,
+        COUNT(*)::bigint AS _count
+      FROM "Beneficiary"
+      GROUP BY is_deleted, status
+    `,
   ]);
+
+  // حساب الأعداد من نتيجة groupBy
+  let totalCount = 0;
+  let activeCount = 0;
+  let deletedCount = 0;
+  for (const row of statusCounts) {
+    const cnt = Number(row._count);
+    if (row.is_deleted) {
+      deletedCount += cnt;
+    } else {
+      totalCount += cnt;
+      if (row.status === "ACTIVE") activeCount = cnt;
+    }
+  }
 
   const totalPages = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
 
