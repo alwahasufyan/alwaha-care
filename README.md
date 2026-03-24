@@ -16,6 +16,12 @@
 - JWT_SECRET
 - INITIAL_BALANCE (اختياري، الافتراضي 600)
 
+متغيرات اختيارية لإنشاء حساب مدير تلقائياً عند أول تشغيل (فقط إذا لا يوجد مدير نشط):
+
+- DEFAULT_ADMIN_USERNAME
+- DEFAULT_ADMIN_PASSWORD
+- DEFAULT_ADMIN_NAME
+
 تم إضافة ملفات جاهزة كنقطة بداية:
 
 - .env.example للتطوير المحلي
@@ -109,6 +115,16 @@ cp .env.production.example .env.production
 
 2. عدل .env.production وضع بيانات قاعدة الإنتاج وJWT_SECRET قوي.
 
+إذا أردت إنشاء مدير افتراضي تلقائياً عند أول تشغيل، أضف المتغيرات التالية في .env.production:
+
+```bash
+DEFAULT_ADMIN_USERNAME=admin
+DEFAULT_ADMIN_PASSWORD=ChangeMe_Immediately
+DEFAULT_ADMIN_NAME=System Admin
+```
+
+مهم: غيّر DEFAULT_ADMIN_PASSWORD مباشرة بعد أول تسجيل دخول.
+
 يمكنك أيضاً تحديد منفذ الاستضافة الخارجي عبر APP_HOST_PORT (مثال: 9091).
 
 3. شغّل التطبيق:
@@ -136,3 +152,5 @@ npx prisma migrate deploy
 ```
 
 تلقائياً قبل تشغيل Next.js لضمان تحديث قاعدة البيانات.
+
+كما يتم تنفيذ bootstrap للمدير الافتراضي (إن كانت متغيراته موجودة) مع شرط أمان: لا ينشئ حساب جديد إذا كان هناك مدير نشط بالفعل.

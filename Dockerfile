@@ -34,4 +34,4 @@ COPY --from=builder /app/next.config.mjs ./next.config.mjs
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "npx prisma migrate deploy && npm run start"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node prisma/bootstrap-admin.js && npm run start"]
