@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { loginSchema, changePasswordSchema, voluntaryChangePasswordSchema } from "@/lib/validation";
 import { login, logout as authLogout, getSession } from "@/lib/auth";
 import { checkRateLimit, resetRateLimit } from "@/lib/rate-limit";
+import { logger } from "@/lib/logger";
 import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
 
@@ -16,6 +17,7 @@ export async function authenticate(prevState: unknown, formData: FormData) {
   }
 
   const { username, password } = validated.data;
+  let stage = "validate";
 
   // فحص Rate Limiting قبل أي استعلام للقاعدة
   const rateLimitError = checkRateLimit(`login:${username}`);
@@ -24,6 +26,7 @@ export async function authenticate(prevState: unknown, formData: FormData) {
   }
 
   try {
+    stage = "find-facility";
     const facility = await prisma.facility.findUnique({
       where: { username },
     });
@@ -33,6 +36,7 @@ export async function authenticate(prevState: unknown, formData: FormData) {
       return { error: "اسم المستخدم أو كلمة المرور غير صحيحة" };
     }
 
+    stage = "verify-password";
     const passwordMatch = await bcrypt.compare(password, facility.password_hash);
 
     if (!passwordMatch) {
@@ -43,6 +47,7 @@ export async function authenticate(prevState: unknown, formData: FormData) {
     resetRateLimit(`login:${username}`);
 
     // تسجيل الحدث في سجل المراجعة
+    stage = "audit-login";
     await prisma.auditLog.create({
       data: {
         facility_id: facility.id,
@@ -52,6 +57,7 @@ export async function authenticate(prevState: unknown, formData: FormData) {
       },
     });
 
+    stage = "create-session";
     await login({
       id: facility.id,
       name: facility.name,
@@ -59,7 +65,27 @@ export async function authenticate(prevState: unknown, formData: FormData) {
       is_admin: facility.is_admin,
       must_change_password: facility.must_change_password,
     });
-  } catch {
+  } catch (error) {
+    const err = error as {
+      name?: string;
+      message?: string;
+      code?: string;
+      stack?: string;
+    };
+
+    logger.error("AUTH_LOGIN_FAILED", {
+      stage,
+      username,
+      errorName: err?.name ?? "UnknownError",
+      errorCode: err?.code ?? null,
+      errorMessage: err?.message ?? "No message",
+      nodeEnv: process.env.NODE_ENV,
+    });
+
+    if (process.env.NODE_ENV !== "production" && err?.stack) {
+      logger.error("AUTH_LOGIN_STACK", { stage, username, stack: err.stack });
+    }
+
     return { error: "حدث خطأ غير متوقع. يرجى المحاولة مجدداً." };
   }
 

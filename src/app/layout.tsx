@@ -9,13 +9,8 @@ const tajawal = Tajawal({
 });
 
 export const metadata: Metadata = {
-  title: "Waha Healthy Care",
-  description: "Waha Healthy Care",
-  icons: {
-    icon: "/icon.png",
-    shortcut: "/icon.png",
-    apple: "/icon.png",
-  },
+  title: "Waha Health Care",
+  description: "Waha Health Care",
 };
 
 export default function RootLayout({

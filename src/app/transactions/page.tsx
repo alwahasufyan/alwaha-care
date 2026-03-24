@@ -91,8 +91,8 @@ export default async function TransactionsPage({
         {/* ترويسة الطباعة فقط */}
         <div className="hidden print:flex flex-col items-center justify-center mb-2 text-center border-b pb-2 pt-2">
            {/* eslint-disable-next-line @next/next/no-img-element */}
-           <img src="/logo.png" alt="Waha Healthy Care" className="h-16 w-auto object-contain mb-2" />
-           <h1 className="text-xl font-black text-black">Waha Healthy Care</h1>
+           <img src="/logo.png" alt="Waha Health Care" className="h-16 w-auto object-contain mb-2" />
+           <h1 className="text-xl font-black text-black">Waha Health Care</h1>
            <h2 className="text-lg font-bold text-black mt-1">سجل الحركات (المراجعة الطبية)</h2>
            <p className="text-sm text-black mt-1 opacity-75">تاريخ استخراج التقرير: {new Date().toLocaleDateString("ar-LY")}</p>
            {session.is_admin && facility_id && <p className="text-sm font-bold mt-1 text-black">خاص بالمرفق: {facilities.find(f => f.id === facility_id)?.name}</p>}
