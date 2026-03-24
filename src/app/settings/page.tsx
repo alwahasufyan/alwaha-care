@@ -18,7 +18,7 @@ export default function SettingsPage() {
               <KeyRound className="h-8 w-8 text-primary" />
             </div>
             <div>
-              <p className="text-base font-black text-slate-900">Waha Healthy Care</p>
+              <p className="text-base font-black text-slate-900">Waha Health Care</p>
             </div>
           </div>
           <h2 className="section-title text-2xl font-black text-slate-950">تغيير كلمة المرور</h2>

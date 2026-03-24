@@ -16,7 +16,7 @@ export default function LoginPage() {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/logo.png" alt="Waha Healthy Care" width={72} height={72} className="object-contain" />
             <div>
-              <p className="text-base font-black text-slate-900">Waha Healthy Care</p>
+              <p className="text-base font-black text-slate-900">Waha Health Care</p>
             </div>
           </div>
           <h2 className="section-title text-2xl font-black text-slate-950">تسجيل الدخول</h2>

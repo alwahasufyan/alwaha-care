@@ -9,8 +9,8 @@ const tajawal = Tajawal({
 });
 
 export const metadata: Metadata = {
-  title: "Waha Healthy Care",
-  description: "Waha Healthy Care",
+  title: "Waha Health Care",
+  description: "Waha Health Care",
 };
 
 export default function RootLayout({
